@@ -47,8 +47,9 @@ judgment providers is a constructor argument.
 * The fixture must be taught about each scenario through cues. That is fixture maintenance, and
   `capabilities/sparring_partner/sandbox.py` is where it accumulates.
 * **A green test suite says nothing about model quality.** This is the important one. Model
-  quality needs its own offline eval harness against recorded cases — which is named in
-  [10 Operations](../architecture/10-operations.md) and is not built.
+  quality needs its own offline eval harness against recorded cases. That is `causeway eval`
+  ([Evaluate models](../guides/evaluate-models.md)), which runs against the hosted model on a
+  schedule rather than on every PR.
 * A cue-driven fixture can be tuned until the demo looks good. The mitigation is that the
   fixture only ever answers questions; it cannot change what the platform *does* with an answer,
   and that is what the tests assert.

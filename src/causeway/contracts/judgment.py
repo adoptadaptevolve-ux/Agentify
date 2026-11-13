@@ -105,6 +105,42 @@ class Score:
 Question = Noul | Choice | Score
 
 
+def question_from_wire(wire: dict[str, Any]) -> Question:
+    """Rebuild a question from its ``to_wire()`` form.
+
+    Used to load recorded or hand-written questions, for example in evaluation
+    datasets. Unknown types and unexpected fields are refused rather than
+    ignored, so a typo cannot quietly change what a question asks.
+    """
+    if not isinstance(wire, dict):
+        raise ContractViolation("a question must be a JSON object")
+    kind = wire.get("type")
+    allowed = {"type", "instructions", "criteria"}
+    unknown = set(wire) - allowed
+    if unknown:
+        raise ContractViolation(f"unexpected question fields {sorted(unknown)}")
+    instructions = wire.get("instructions")
+    if not isinstance(instructions, str) or not instructions.strip():
+        raise ContractViolation("a question needs non-empty instructions")
+    criteria = wire.get("criteria")
+    match kind:
+        case "noul":
+            if criteria is not None and not (
+                isinstance(criteria, dict) and all(isinstance(v, str) for v in criteria.values())
+            ):
+                raise ContractViolation("noul criteria must map labels to descriptions")
+            return Noul(instructions=instructions, criteria=criteria)
+        case "choice":
+            if not isinstance(criteria, dict):
+                raise ContractViolation("choice criteria must map options to descriptions")
+            return Choice(instructions=instructions, criteria=dict(criteria))
+        case "score":
+            if not isinstance(criteria, list) or not all(isinstance(v, str) for v in criteria):
+                raise ContractViolation("score criteria must be an ordered list of levels")
+            return Score(instructions=instructions, criteria=list(criteria))
+    raise ContractViolation(f"unknown question type {kind!r}")
+
+
 @dataclass(frozen=True, slots=True)
 class NoulAnswer:
     """The probability that the answer to a ``Noul`` is yes."""

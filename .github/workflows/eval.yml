@@ -1,0 +1,39 @@
+name: model eval
+
+# Scores the hosted judgment model against the labelled cases in evals/.
+# Runs weekly and on demand, never on pull requests: model quality changes on
+# the provider's schedule, not ours, and PR checks must stay deterministic.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hosted:
+    runs-on: ubuntu-latest
+    env:
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+    steps:
+      - name: Skip without a model key
+        if: env.TYPESAFE_API_KEY == ''
+        run: echo "::notice::TYPESAFE_API_KEY is not set as a repository secret; skipping the hosted model eval."
+      - uses: actions/checkout@v4
+        if: env.TYPESAFE_API_KEY != ''
+      - uses: actions/setup-python@v5
+        if: env.TYPESAFE_API_KEY != ''
+        with:
+          python-version: "3.12"
+      - name: Install
+        if: env.TYPESAFE_API_KEY != ''
+        run: python -m pip install -e ".[systemone]"
+      - name: Evaluate
+        if: env.TYPESAFE_API_KEY != ''
+        run: python -m causeway.cli eval evals/cases --judge hosted --gates evals/gates.json --out eval-report.json
+      - uses: actions/upload-artifact@v4
+        if: always() && env.TYPESAFE_API_KEY != ''
+        with:
+          name: eval-report
+          path: eval-report.json

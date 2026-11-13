@@ -19,6 +19,7 @@ Honest status. The prototype covers phase 0 and most of phase 1.
 * Workflow runtime: explicit graphs, budgets, checkpoints, pause and resume, cancellation
 * Durable single-host state: SQLite-backed approval, idempotency and nonce stores (`Platform.local(state_path=...)`)
 * Compensation: a failed workflow undoes its completed reversible actions, newest first, through the transaction guard
+* Offline model evaluation: labelled cases, quality gates and regression checks (`causeway eval`)
 * SDK and CLI
 * One golden path end to end: the genAI sparring partner
 
@@ -36,8 +37,7 @@ Honest status. The prototype covers phase 0 and most of phase 1.
 * Entitlement-aware retrieval caching with correct invalidation
 * Cost routing by risk and capability
 * Self-service onboarding and fleet governance
-* The offline eval harness named in [10 Operations](architecture/10-operations.md) — currently
-  the largest gap, because a green test suite says nothing about model quality
+* A larger eval dataset, harvested from production judgments rather than hand-written
 
 ## Later — research
 

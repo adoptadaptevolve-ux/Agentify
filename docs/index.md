@@ -41,6 +41,7 @@ problem, what was chosen, what was rejected, and what the choice costs.
 | [Write falsifiers](guides/write-falsifiers.md) | How to attack your own claims well |
 | [Policy packs](guides/policy-packs.md) | Rules as versioned, testable artifacts |
 | [Evidence and replay](guides/evidence-and-replay.md) | Answering "why was this allowed?" |
+| [Evaluate models](guides/evaluate-models.md) | Is the judgment model good enough, and did it get worse? |
 | [Operating model](guides/operating-model.md) | Who owns what |
 
 ### Reference

@@ -10,6 +10,8 @@ Three of these commands answer questions that otherwise turn into a meeting:
   reader who has never seen this codebase.
 * ``graph`` answers "what does this workflow actually do?" in a form a reviewer
   who is not an engineer can read.
+* ``eval`` answers "is the judgment model any good at the platform's questions,
+  and is it better or worse than last time?" against labelled cases.
 
 Standard library only, so it runs wherever Python does.
 """
@@ -218,6 +220,66 @@ def cmd_demo(args: argparse.Namespace) -> int:
     return int(demo_main())
 
 
+def _sparring_suites() -> Any:
+    """The sparring partner's falsification suites, when that capability is present."""
+    from .verify.falsify import SuiteLibrary
+
+    sys.path.insert(0, str(Path.cwd()))
+    try:
+        from capabilities.sparring_partner.falsifiers import (
+            MODEL_CHANGE_SUITE,
+            PROPOSAL_INTEGRITY_SUITE,
+        )
+    except ImportError:
+        return SuiteLibrary()
+    return SuiteLibrary().add(MODEL_CHANGE_SUITE).add(PROPOSAL_INTEGRITY_SUITE)
+
+
+def _eval_judge(kind: str) -> Any:
+    """Build the judge ``causeway eval`` scores.
+
+    ``hosted`` never falls back to the fixture: scoring the fixture while
+    calling it the hosted model would report a quality nobody measured.
+    """
+    import os
+
+    from .judgment import HostedSystemOne, OfflineSystemOne
+    from .judgment.systemone import DEFAULT_MODEL
+
+    if kind == "hosted":
+        if not os.environ.get("TYPESAFE_API_KEY"):
+            raise SystemExit("causeway eval --judge hosted needs TYPESAFE_API_KEY to be set")
+        return HostedSystemOne(model=os.environ.get("TYPESAFE_DEFAULT_MODEL", DEFAULT_MODEL))
+    if kind == "sandbox":
+        sys.path.insert(0, str(Path.cwd()))
+        from capabilities.sparring_partner.sandbox import sandbox_judge
+
+        return sandbox_judge()
+    return OfflineSystemOne()
+
+
+def cmd_eval(args: argparse.Namespace) -> int:
+    """Score a judgment model against labelled cases."""
+    from .evals import EvalHarness, load_cases, load_gates
+
+    cases = load_cases(args.cases, suites=_sparring_suites())
+    report = EvalHarness(_eval_judge(args.judge)).run(cases)
+    baseline = (
+        json.loads(Path(args.baseline).read_text(encoding="utf-8")) if args.baseline else None
+    )
+    report.check(
+        gates=load_gates(args.gates) if args.gates else None,
+        baseline=baseline,
+        tolerance=args.tolerance,
+    )
+    if args.out:
+        Path(args.out).write_text(report.to_json() + "\n", encoding="utf-8")
+    print(report.summary_text())
+    if args.out:
+        print(f"\nreport written to {args.out}")
+    return 0 if report.passed else 1
+
+
 def cmd_tiers(args: argparse.Namespace) -> int:
     """Print the risk tiers and what each one means."""
     for tier in RiskTier:
@@ -270,6 +332,27 @@ def build_parser() -> argparse.ArgumentParser:
     falsifiers = subparsers.add_parser("falsifiers", help="print a falsification suite")
     falsifiers.add_argument("suite", nargs="?", default="model_change")
     falsifiers.set_defaults(func=cmd_falsifiers)
+
+    evaluate = subparsers.add_parser(
+        "eval", help="score a judgment model against labelled cases"
+    )
+    evaluate.add_argument("cases", help="a *.jsonl case file, or a directory of them")
+    evaluate.add_argument(
+        "--judge",
+        choices=["sandbox", "offline", "hosted"],
+        default="sandbox",
+        help="which judge to score (hosted needs TYPESAFE_API_KEY)",
+    )
+    evaluate.add_argument("--gates", help="JSON file of quality limits; any failure exits 1")
+    evaluate.add_argument("--baseline", help="a previous report to check for regressions")
+    evaluate.add_argument(
+        "--tolerance",
+        type=float,
+        default=0.02,
+        help="how much worse than the baseline a metric may get (default 0.02)",
+    )
+    evaluate.add_argument("--out", help="write the full JSON report here")
+    evaluate.set_defaults(func=cmd_eval)
 
     verify = subparsers.add_parser("verify-evidence", help="re-verify a JSONL evidence chain")
     verify.add_argument("ledger")
