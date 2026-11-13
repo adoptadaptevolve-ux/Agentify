@@ -67,6 +67,16 @@ def _verify_case_exists(intent: ActionIntent, result: CapabilityResult) -> bool:
     return _CASES.get(case_id, {}).get("status") == "open"
 
 
+def _close_case_arguments(arguments: Mapping[str, Any], external_ref: str | None) -> dict[str, Any]:
+    """How to undo one ``open_model_review_case``: close the case it opened."""
+    if external_ref is None:
+        raise ValidationFailed("cannot close a case whose id was never recorded")
+    return {
+        "case_id": external_ref,
+        "reason": f"compensating: the run that opened this case for {arguments['model_id']} failed",
+    }
+
+
 def _close_case(intent: ActionIntent, grant: CredentialGrant) -> CapabilityResult:
     """Close a model review case. The compensation for opening one."""
     case_id = intent.arguments["case_id"]
@@ -178,6 +188,7 @@ SPARRING_CAPABILITIES: tuple[Capability, ...] = (
         verifier=_verify_case_exists,
         semantic_validators=(_reject_empty_findings,),
         compensation_capability="close_model_review_case",
+        compensation_arguments=_close_case_arguments,
         data_classes=frozenset({DataClass.INTERNAL}),
         approval_queue="ml-platform-reviews",
         rate_limit_per_minute=30,

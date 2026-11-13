@@ -75,7 +75,7 @@ def reconstruct(ledger: EvidenceLedger, run_id: str) -> RunReconstruction:
                 reconstruction.status = payload.get("status", "finished")
             case event_types.RUN_FAILED:
                 reconstruction.finished_at = payload.get("finished_at")
-                reconstruction.status = "failed"
+                reconstruction.status = payload.get("status", "failed")
             case event_types.POLICY_EVALUATED | event_types.POLICY_DENIED:
                 reconstruction.decisions.append({**payload, "action_digest": event.action_digest})
             case (

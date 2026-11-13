@@ -56,10 +56,34 @@ the step's idempotency key means re-running it cannot duplicate what it already 
 `tests/test_sparring_partner_e2e.py` asserts that the record step runs twice and opens exactly
 one case.
 
+## Compensation
+
+A journey that fails half way leaves the world in a state nobody chose. So every action whose
+capability declares a `compensation_capability` is recorded on the run as it completes, with
+the arguments to undo it derived by the capability's `compensation_arguments` recipe. When a
+run fails -- a step raises, the budget runs out, a step leaves its declared edges -- the runner
+undoes those actions **newest first**.
+
+* **Undo is governed.** Each compensation goes through the transaction guard like any other
+  action: the run must hold the compensating capability, and policy may refuse it or route it
+  to a human. The guardrail sweep is skipped, because the arguments come from the capability
+  author's recipe and a verified receipt rather than from a model, and the budget is not
+  charged, because a run that failed by exhausting its budget must still be able to clean up.
+* **Undo happens once.** Each compensation carries the idempotency key
+  `compensate:<action id>`, so a repeated rollback -- including one after a restart, when the
+  platform keeps its state on disk -- returns the first rollback's receipt.
+* **What cannot be undone is named.** A run whose actions were all undone ends `COMPENSATED`.
+  Anything left standing -- no recipe, no authority, a refusal, an undo awaiting approval --
+  keeps the run `FAILED`, and `state.compensation.outstanding` lists each action for a person.
+
+Every rollback is in the evidence chain as `tool.action_compensated`, linking the original
+action to the action that undid it.
+
 ## Cancellation
 
 `cancel()` is a supported operation, not an exception. Kill switches and safe shutdown depend
 on there being a way to stop a run that leaves the evidence chain intact and says why.
+`cancel(..., compensate=True)` also undoes the run's completed reversible actions.
 
 ## Subagents
 

@@ -133,6 +133,13 @@ Verifier = Callable[[ActionIntent, CapabilityResult], bool]
 """A post-condition: did the side effect actually land? Retrying a mutation
 without checking is how duplicates happen."""
 
+CompensationArguments = Callable[[Mapping[str, Any], str | None], dict[str, Any]]
+"""Derives the compensating call's arguments from the original call.
+
+Receives the original call's arguments and the downstream system's
+``external_ref`` from its receipt. Written by the capability's author, not by a
+model, so the undo of an action is as reviewable as the action itself."""
+
 SemanticValidator = Callable[[Mapping[str, Any]], None]
 """A domain check that a schema cannot express. Raises ``ValidationFailed``."""
 
@@ -152,6 +159,10 @@ class Capability:
     idempotent: bool = True
     irreversible: bool = False
     compensation_capability: str | None = None
+    compensation_arguments: CompensationArguments | None = None
+    """How to call ``compensation_capability`` to undo one execution. Without
+    it a failed workflow can name the undo but not run it, and the action goes
+    to manual reconciliation instead."""
 
     data_classes: frozenset[DataClass] = field(
         default_factory=lambda: frozenset({DataClass.INTERNAL})
@@ -175,6 +186,10 @@ class Capability:
         if self.irreversible and self.compensation_capability:
             raise ConfigurationError(
                 f"{self.id}: an irreversible capability cannot declare a compensation"
+            )
+        if self.compensation_arguments is not None and self.compensation_capability is None:
+            raise ConfigurationError(
+                f"{self.id}: compensation_arguments needs a compensation_capability to call"
             )
         if self.risk_tier >= RiskTier.R3_CUSTOMER_IMPACT and self.idempotent is False:
             # Not a hard error -- some actions genuinely are not idempotent --

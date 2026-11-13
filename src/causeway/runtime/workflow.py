@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 from ..contracts.evidence import EventDomain
 from ..errors import ApprovalRequired, BudgetExhausted, ConfigurationError, ContractViolation
 from ..evidence import events as event_types
+from .compensation import CompensationReport, compensate_run
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to type checkers
     from ..sdk import AgentRun
@@ -44,6 +45,10 @@ class RunStatus(StrEnum):
     """Waiting on a human decision or an external event. Resumable."""
     COMPLETED = "completed"
     FAILED = "failed"
+    """Stopped on an error, with side effects left standing (see
+    ``RunState.compensation`` for what could not be undone)."""
+    COMPENSATED = "compensated"
+    """Stopped on an error, and every completed reversible action was undone."""
     CANCELLED = "cancelled"
 
 
@@ -184,6 +189,8 @@ class RunState:
     pending_action_digest: str | None = None
     error: str | None = None
     history: list[str] = field(default_factory=list)
+    compensation: CompensationReport | None = None
+    """What the runner undid after a failure, and what it could not."""
 
     @property
     def is_resumable(self) -> bool:
@@ -252,15 +259,20 @@ class WorkflowRunner:
         state.pending_action_digest = None
         return self._drive(run, state)
 
-    def cancel(self, run: AgentRun, state: RunState, *, reason: str) -> RunState:
+    def cancel(
+        self, run: AgentRun, state: RunState, *, reason: str, compensate: bool = False
+    ) -> RunState:
         """Stop a run deliberately, recording why.
 
         Cancellation is a first-class feature, not an exception: kill switches
         and safe shutdown depend on there being a supported way to stop a run
-        that leaves the evidence chain intact.
+        that leaves the evidence chain intact. Pass ``compensate=True`` to also
+        undo the run's completed reversible actions.
         """
         state.status = RunStatus.CANCELLED
         state.error = reason
+        if compensate and run.compensations:
+            state.compensation = compensate_run(run, reason=f"cancelled: {reason}")
         self._checkpoint(run, state)
         run.ledger.append(
             domain=EventDomain.AGENT,
@@ -273,6 +285,9 @@ class WorkflowRunner:
                 "reason": reason,
                 "finished_at": datetime.now(UTC).isoformat(),
                 "steps": state.history,
+                "compensation": (
+                    state.compensation.describe() if state.compensation is not None else None
+                ),
             },
         )
         return state
@@ -312,6 +327,7 @@ class WorkflowRunner:
             except Exception as exc:
                 state.status = RunStatus.FAILED
                 state.error = f"{type(exc).__name__}: {exc}"
+                self._unwind(run, state)
                 self._checkpoint(run, state)
                 run.ledger.append(
                     domain=EventDomain.AGENT,
@@ -320,10 +336,16 @@ class WorkflowRunner:
                     tenant=run.tenant,
                     actor=run.workload.service,
                     payload={
+                        "status": state.status.value,
                         "step": step.id,
                         "error": type(exc).__name__,
                         "detail": str(exc),
                         "finished_at": datetime.now(UTC).isoformat(),
+                        "compensation": (
+                            state.compensation.describe()
+                            if state.compensation is not None
+                            else None
+                        ),
                     },
                 )
                 return state
@@ -344,6 +366,8 @@ class WorkflowRunner:
                 break
             state.current_step = outcome.next_step
 
+        if state.status is RunStatus.FAILED:
+            self._unwind(run, state)
         self._checkpoint(run, state)
         run.ledger.append(
             domain=EventDomain.AGENT,
@@ -361,9 +385,26 @@ class WorkflowRunner:
                 "steps": state.history,
                 "budget": run.budget.snapshot(),
                 "finished_at": datetime.now(UTC).isoformat(),
+                "compensation": (
+                    state.compensation.describe() if state.compensation is not None else None
+                ),
             },
         )
         return state
+
+    @staticmethod
+    def _unwind(run: AgentRun, state: RunState) -> None:
+        """Undo the failed run's completed reversible actions, newest first.
+
+        A run that undoes everything ends ``COMPENSATED``. A run with anything
+        left standing stays ``FAILED``, and ``state.compensation.outstanding``
+        names each action that needs a person.
+        """
+        if not run.compensations:
+            return
+        state.compensation = compensate_run(run, reason=state.error or "run failed")
+        if state.compensation.complete:
+            state.status = RunStatus.COMPENSATED
 
     @staticmethod
     def _checkpoint(run: AgentRun, state: RunState) -> Checkpoint:

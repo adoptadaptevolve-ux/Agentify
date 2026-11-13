@@ -27,6 +27,7 @@ Capability(
     verifier=_verify_case_exists,             # did the side effect actually land?
     semantic_validators=(_reject_empty_findings,),
     compensation_capability="close_model_review_case",
+    compensation_arguments=_close_case_arguments,  # how to undo one execution
     approval_queue="ml-platform-reviews",     # a domain queue, never "AI review"
     rate_limit_per_minute=30,
 )
@@ -40,6 +41,9 @@ Four fields carry most of the weight:
   retry after a timeout has no way to know whether it is creating a duplicate.
 * **`compensation_capability`** declares the rollback. A capability with neither a compensation
   nor `irreversible=True` has not been thought about.
+* **`compensation_arguments`** says how to call the rollback for one execution, from the
+  original arguments and the receipt's `external_ref`. With it, a failed workflow undoes the
+  action automatically; without it, the action is left for a person.
 * **`semantic_validators`** express what a schema cannot — "a blocking case must list its
   findings" — and run *before* the action has an identity.
 
