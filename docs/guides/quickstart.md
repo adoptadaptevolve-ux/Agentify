@@ -1,8 +1,8 @@
 # Quickstart
 
 ```bash
-git clone https://github.com/calm-trader/agentic-ai-platform
-cd agentic-ai-platform
+git clone https://github.com/adoptadaptevolve-ux/Agentify
+cd Agentify
 pip install -e ".[dev]"
 make demo    # no API key, no network
 make test

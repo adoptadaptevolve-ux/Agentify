@@ -40,8 +40,8 @@ dev = [
 causeway = "causeway.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/calm-trader/agentic-ai-platform"
-Documentation = "https://github.com/calm-trader/agentic-ai-platform/tree/main/docs"
+Homepage = "https://github.com/adoptadaptevolve-ux/Agentify"
+Documentation = "https://github.com/adoptadaptevolve-ux/Agentify/tree/main/docs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/causeway"]
