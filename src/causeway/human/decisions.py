@@ -13,16 +13,18 @@ judge it. So this service is built around four rules:
 * **Domain queues.** Items route to the team that can actually judge them.
 * **Expiry denies.** A lapsed window is a denial, never a timeout into allow.
 
-The reference implementation is in-memory and single-process, which is right
-for the sandbox and wrong for production: a real deployment needs a durable
-queue, because an approval that is lost on restart is an action that silently
-never happens.
+Where items are kept is a separate concern behind :class:`ApprovalStore`. The
+default :class:`InMemoryApprovalStore` is right for the sandbox and wrong for
+production: an approval that is lost on restart is an action that silently
+never happens. :class:`causeway.storage.SqliteApprovalStore` keeps items, decisions
+and spent markers on disk, so a restart resumes exactly where it stopped.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 from ..canonical import digest
 from ..contracts.human import (
@@ -44,10 +46,88 @@ world the reviewer looked at goes stale."""
 
 
 @dataclass(slots=True)
-class _Record:
+class ApprovalRecord:
+    """One item with everything decided about it so far."""
+
     item: ApprovalItem
     decisions: list[SignedDecision] = field(default_factory=list)
     spent: bool = False
+
+
+class ApprovalStore(Protocol):
+    """Where approval items, decisions and spent markers live.
+
+    The service holds all of the rules; a store only remembers. Each method is a
+    single write or read so a durable store can make every one atomic.
+    """
+
+    def approval_for_digest(self, action_digest: str) -> str | None:
+        """The approval id opened for ``action_digest``, if any."""
+        ...
+
+    def load(self, approval_id: str) -> ApprovalRecord | None:
+        """The full record for ``approval_id``, if it exists."""
+        ...
+
+    def insert(self, item: ApprovalItem) -> ApprovalItem:
+        """Store a new item, or return the existing one for the same digest.
+
+        Returning the existing item, rather than failing, keeps two concurrent
+        requests for the same action from opening two queue entries.
+        """
+        ...
+
+    def add_decision(self, decision: SignedDecision) -> None:
+        """Append one reviewer's decision.
+
+        Raises :class:`ReplayDetected` if that reviewer already decided this
+        item, so the dual-control rule holds even under a race.
+        """
+        ...
+
+    def mark_spent(self, approval_id: str) -> None:
+        """Record that the approval has been consumed."""
+        ...
+
+    def records(self) -> list[ApprovalRecord]:
+        """Every record, for queue views."""
+        ...
+
+
+class InMemoryApprovalStore:
+    """Reference store: a pair of dicts. Lost on restart."""
+
+    def __init__(self) -> None:
+        self._by_approval: dict[str, ApprovalRecord] = {}
+        self._by_digest: dict[str, str] = {}
+
+    def approval_for_digest(self, action_digest: str) -> str | None:
+        return self._by_digest.get(action_digest)
+
+    def load(self, approval_id: str) -> ApprovalRecord | None:
+        return self._by_approval.get(approval_id)
+
+    def insert(self, item: ApprovalItem) -> ApprovalItem:
+        existing = self._by_digest.get(item.action_digest)
+        if existing is not None:
+            return self._by_approval[existing].item
+        self._by_approval[item.approval_id] = ApprovalRecord(item=item)
+        self._by_digest[item.action_digest] = item.approval_id
+        return item
+
+    def add_decision(self, decision: SignedDecision) -> None:
+        record = self._by_approval[decision.approval_id]
+        if any(prior.approver_id == decision.approver_id for prior in record.decisions):
+            raise ReplayDetected(
+                f"{decision.approver_id} has already decided approval {decision.approval_id}"
+            )
+        record.decisions.append(decision)
+
+    def mark_spent(self, approval_id: str) -> None:
+        self._by_approval[approval_id].spent = True
+
+    def records(self) -> list[ApprovalRecord]:
+        return list(self._by_approval.values())
 
 
 class HumanDecisionService:
@@ -58,11 +138,11 @@ class HumanDecisionService:
         *,
         window: timedelta = DEFAULT_WINDOW,
         validity: timedelta = DEFAULT_DECISION_VALIDITY,
+        store: ApprovalStore | None = None,
     ) -> None:
         self._window = window
         self._validity = validity
-        self._by_approval: dict[str, _Record] = {}
-        self._by_digest: dict[str, str] = {}
+        self._store: ApprovalStore = store if store is not None else InMemoryApprovalStore()
 
     def request(
         self,
@@ -83,9 +163,9 @@ class HumanDecisionService:
         queue entries that two reviewers each approve half of.
         """
         moment = now or datetime.now(UTC)
-        existing_id = self._by_digest.get(action_digest)
+        existing_id = self._store.approval_for_digest(action_digest)
         if existing_id is not None:
-            return self._by_approval[existing_id].item
+            return self._require(existing_id).item
 
         item = ApprovalItem(
             approval_id=new_approval_id(),
@@ -99,9 +179,7 @@ class HumanDecisionService:
             required_approvals=required_approvals,
             required_authority=required_authority,
         )
-        self._by_approval[item.approval_id] = _Record(item=item)
-        self._by_digest[action_digest] = item.approval_id
-        return item
+        return self._store.insert(item)
 
     def decide(
         self,
@@ -150,7 +228,7 @@ class HumanDecisionService:
                 }
             ),
         )
-        record.decisions.append(decision)
+        self._store.add_decision(decision)
         return decision
 
     def resolve(
@@ -163,10 +241,10 @@ class HumanDecisionService:
         window lapsed, so the caller records a denial rather than a silence.
         """
         moment = now or datetime.now(UTC)
-        approval_id = self._by_digest.get(action_digest)
+        approval_id = self._store.approval_for_digest(action_digest)
         if approval_id is None:
             return None
-        record = self._by_approval[approval_id]
+        record = self._require(approval_id)
         item = record.item
 
         denials = [d for d in record.decisions if d.outcome is DecisionOutcome.DENIED]
@@ -201,16 +279,16 @@ class HumanDecisionService:
 
         Called by the transaction guard after the side effect succeeds.
         """
-        approval_id = self._by_digest.get(action_digest)
+        approval_id = self._store.approval_for_digest(action_digest)
         if approval_id is None:
             raise DigestMismatch(f"no approval item for digest {action_digest}")
-        self._by_approval[approval_id].spent = True
+        self._store.mark_spent(approval_id)
 
     def pending(self, *, queue: str | None = None) -> tuple[ApprovalItem, ...]:
         """Items still awaiting a decision, for a queue dashboard."""
         return tuple(
             record.item
-            for record in self._by_approval.values()
+            for record in self._store.records()
             if not record.spent
             and len(record.decisions) < record.item.required_approvals
             and (queue is None or record.item.queue == queue)
@@ -220,11 +298,11 @@ class HumanDecisionService:
         """Fetch one item."""
         return self._require(approval_id).item
 
-    def _require(self, approval_id: str) -> _Record:
-        try:
-            return self._by_approval[approval_id]
-        except KeyError:
-            raise ContractViolation(f"unknown approval {approval_id!r}") from None
+    def _require(self, approval_id: str) -> ApprovalRecord:
+        record = self._store.load(approval_id)
+        if record is None:
+            raise ContractViolation(f"unknown approval {approval_id!r}")
+        return record
 
 
 def build_packet(

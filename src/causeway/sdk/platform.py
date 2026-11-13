@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import timedelta
+from os import PathLike
 from typing import TYPE_CHECKING
 
 from ..authority.issuer import DelegationIssuer
@@ -38,6 +39,13 @@ from ..policy.pack import PolicyPack
 from ..registry.capability import Capability, CapabilityRegistry
 from ..registry.models import ModelCatalog
 from ..runtime.budgets import BudgetLedger, RunBudget
+from ..storage.sqlite import (
+    SqliteApprovalStore,
+    SqliteIdempotencyStore,
+    SqliteNonceStore,
+    StateDatabase,
+    open_state_db,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from .run import AgentRun
@@ -61,6 +69,8 @@ class Platform:
     memory: MemoryStore = field(default_factory=MemoryStore)
     models: ModelCatalog = field(default_factory=ModelCatalog)
     audience: str = TOOL_GATEWAY_AUDIENCE
+    state: StateDatabase | None = None
+    """The durable state file, when the platform was built with one."""
 
     @staticmethod
     def local(
@@ -73,19 +83,37 @@ class Platform:
         credentials: CredentialBroker | None = None,
         models: ModelCatalog | None = None,
         delegation_lifetime: timedelta = timedelta(minutes=10),
+        state_path: str | PathLike[str] | None = None,
     ) -> Platform:
-        """Build the local sandbox: in-memory everything, offline judgment.
+        """Build the local sandbox: offline judgment, in-memory by default.
 
         This is what a developer gets from ``causeway init`` and what CI runs.
         Its behaviour is identical to production on every control path; only
         the backing stores differ.
+
+        Pass ``state_path`` to keep approvals, idempotency keys and delegation
+        nonces in a SQLite file instead of memory. A platform rebuilt on the
+        same file resumes exactly where the previous one stopped: pending
+        approvals are still pending, spent ones stay spent, and a retried
+        action returns its original receipt instead of running again.
         """
         active_signer = signer or HmacSigner()
         registry = CapabilityRegistry(capabilities or [])
         engine = PolicyEngine(pack)
         evidence = ledger or InMemoryEvidenceLedger()
-        approvals = HumanDecisionService()
-        verifier = DelegationVerifier(active_signer, nonce_store=NonceStore())
+        idempotency: IdempotencyStore
+        nonces: NonceStore
+        state: StateDatabase | None = None
+        if state_path is None:
+            approvals = HumanDecisionService()
+            idempotency = IdempotencyStore()
+            nonces = NonceStore()
+        else:
+            state = open_state_db(state_path)
+            approvals = HumanDecisionService(store=SqliteApprovalStore(state))
+            idempotency = SqliteIdempotencyStore(state)
+            nonces = SqliteNonceStore(state)
+        verifier = DelegationVerifier(active_signer, nonce_store=nonces)
         return Platform(
             registry=registry,
             policy=engine,
@@ -98,14 +126,20 @@ class Platform:
                 ledger=evidence,
                 approvals=approvals,
                 credentials=credentials or LocalCredentialBroker(),
-                idempotency=IdempotencyStore(),
+                idempotency=idempotency,
                 audience=TOOL_GATEWAY_AUDIENCE,
             ),
             judge=judge or default_judge(),
             issuer=DelegationIssuer(active_signer, default_lifetime=delegation_lifetime),
             delegation_verifier=verifier,
             models=models or ModelCatalog(),
+            state=state,
         )
+
+    def close(self) -> None:
+        """Release the durable state file, if there is one. Safe to call twice."""
+        if self.state is not None:
+            self.state.close()
 
     def begin(
         self,

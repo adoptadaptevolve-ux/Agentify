@@ -250,9 +250,12 @@ Honest list of what is a reference implementation here and needs replacing:
   also mint. Production implements `Signer` against an HSM or KMS.
 - **Evidence** is in-memory or single-node JSONL. Production needs append-only storage
   with independent retention and an external anchor.
-- **Approvals, idempotency and nonces** are in-memory and single-process. All three need
-  durable, replica-shared stores; a nonce store that forgets is a replay window, and an
-  approval lost on restart is an action that silently never happens.
+- **Approvals, idempotency and nonces** are in-memory by default. Pass
+  `state_path=` to `Platform.local()` to keep all three in a SQLite file
+  (`causeway.storage`) that survives restarts and is safe across processes on
+  one host. Several hosts still need a networked store behind the same
+  interfaces; a nonce store that forgets is a replay window, and an approval
+  lost on restart is an action that silently never happens.
 - **Retrieval** ranks by term overlap. Swap the matcher for hybrid search; keep the
   entitlement filter exactly as it is.
 - **The offline judge** is a fixture, not a model. It exists so CI and the local sandbox
