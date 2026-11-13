@@ -17,6 +17,7 @@ Honest status. The prototype covers phase 0 and most of phase 1.
 * Human decision service: digest-bound, domain-queued, dual control, expiry-denies
 * Hash-chained evidence ledger, run reconstruction, forensic export
 * Workflow runtime: explicit graphs, budgets, checkpoints, pause and resume, cancellation
+* Durable single-host state: SQLite-backed approval, idempotency and nonce stores (`Platform.local(state_path=...)`)
 * SDK and CLI
 * One golden path end to end: the genAI sparring partner
 
@@ -24,7 +25,7 @@ Honest status. The prototype covers phase 0 and most of phase 1.
 
 * Compensation execution: the guard declares and records compensations but does not yet run
   them on a failed multi-step journey
-* Durable stores behind the approval queue, idempotency store and nonce store
+* Replica-shared stores behind the approval queue, idempotency store and nonce store (single-host SQLite stores are built: `causeway.storage`)
 * KMS/HSM `Signer` implementation
 * Semantic egress broker with format-aware DLP, beyond the current typed egress questions
 * Red-team automation: an injection corpus run against every registered capability in CI
