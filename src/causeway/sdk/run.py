@@ -26,7 +26,7 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from ..contracts.action import ExecutionReceipt
+from ..contracts.action import ExecutionReceipt, ResultClass
 from ..contracts.delegation import Constraints, SignedDelegation
 from ..contracts.evidence import EventDomain
 from ..contracts.identity import DataClass, Principal, WorkloadIdentity
@@ -40,6 +40,7 @@ from ..judgment.recording import RecordingJudge
 from ..knowledge.memory import MemoryEntry, MemoryScope
 from ..knowledge.retrieval import RetrievalResult
 from ..runtime.budgets import BudgetLedger
+from ..runtime.compensation import CompensationEntry, compensation_key
 from ..verify.falsify import FalsificationReport, FalsificationSuite
 from ..verify.supervisors import BoardDecision, ReviewCase, Supervisor, SupervisorBoard
 
@@ -65,6 +66,10 @@ class AgentRun:
     domain: str
     parent_run_id: str | None = None
     notes: list[str] = field(default_factory=list)
+    compensations: list[CompensationEntry] = field(default_factory=list)
+    """Completed reversible actions, oldest first, with how to undo each.
+
+    The workflow runner unwinds these, newest first, when a run fails."""
 
     @property
     def tenant(self) -> str:
@@ -332,7 +337,7 @@ class AgentRun:
                     recommendation=board.rationale,
                 )
 
-        return self.platform.guard.invoke(
+        receipt = self.platform.guard.invoke(
             capability_id=capability_id,
             arguments=arguments,
             delegation=scoped,
@@ -344,6 +349,87 @@ class AgentRun:
             idempotency_key=idempotency_key,
             signals=combined,
             review=review,
+        )
+        self._record_for_compensation(arguments, receipt)
+        return receipt
+
+    def compensate(self, entry: CompensationEntry) -> ExecutionReceipt:
+        """Undo one recorded action through the transaction guard.
+
+        Policy, approval, idempotency and evidence all apply: the run must hold
+        the compensating capability, and policy may still refuse or route the
+        undo to a human. Two things differ from :meth:`invoke_tool`, both on
+        purpose. The guardrail sweep is skipped, because the arguments come
+        from the capability author's recipe and a verified receipt, not from a
+        model. And the run's budget is not charged, because a run that failed
+        by exhausting its budget must still be able to clean up after itself.
+        """
+        if entry.arguments is None:
+            raise ValueError(f"no arguments recorded to undo action {entry.action_id}")
+        key = compensation_key(entry.action_id)
+        scoped = self.platform.issuer.attenuate(
+            self.delegation,
+            capabilities=frozenset({entry.compensation_capability}),
+            idempotency_key=key,
+        )
+        receipt = self.platform.guard.invoke(
+            capability_id=entry.compensation_capability,
+            arguments=dict(entry.arguments),
+            delegation=scoped,
+            idempotency_key=key,
+        )
+        self.ledger.append(
+            domain=EventDomain.TOOL,
+            event_type=event_types.ACTION_COMPENSATED,
+            run_id=self.run_id,
+            tenant=self.tenant,
+            actor=self.workload.service,
+            action_id=entry.action_id,
+            payload={
+                "capability": entry.capability,
+                "compensation_capability": entry.compensation_capability,
+                "compensation_action_id": receipt.action_id,
+                "result_class": ResultClass.COMPENSATED.value,
+            },
+        )
+        return receipt
+
+    def _record_for_compensation(
+        self, arguments: dict[str, Any], receipt: ExecutionReceipt
+    ) -> None:
+        """Remember how to undo ``receipt``, if it can be undone."""
+        if receipt.compensation_capability is None:
+            return
+        if receipt.result_class not in (ResultClass.SUCCESS, ResultClass.DUPLICATE):
+            return
+        if any(entry.action_id == receipt.action_id for entry in self.compensations):
+            return  # a resumed step re-ran an action already recorded
+        capability = self.platform.registry.get(receipt.capability)
+        external_ref = next(
+            (
+                note.removeprefix("external_ref=")
+                for note in receipt.notes
+                if note.startswith("external_ref=")
+            ),
+            None,
+        )
+        recipe = capability.compensation_arguments
+        derived: dict[str, Any] | None = None
+        problem: str | None = None
+        if recipe is not None:
+            try:
+                derived = recipe(arguments, external_ref)
+            except Exception as exc:
+                problem = f"could not derive undo arguments: {type(exc).__name__}: {exc}"
+        self.compensations.append(
+            CompensationEntry(
+                action_id=receipt.action_id,
+                capability=receipt.capability,
+                compensation_capability=receipt.compensation_capability,
+                arguments=derived,
+                external_ref=external_ref,
+                problem=problem,
+            )
         )
 
     def emit_evidence(
