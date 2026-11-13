@@ -1,0 +1,51 @@
+{
+  "name": "ml-platform",
+  "version": "2026.09.18",
+  "description": "What the ML platform domain permits. Composed with platform-baseline, which supplies the tier postures; composition can only tighten, so nothing here can loosen a baseline control.",
+  "hard_deny_capabilities": ["delete_experiment_lineage"],
+  "rules": [
+    {
+      "id": "ml-engineer-review-cases",
+      "effect": "allow",
+      "description": "ML engineers may open and close their own model review cases",
+      "capabilities": ["open_model_review_case", "close_model_review_case"],
+      "principal_roles": ["ml-engineer", "ml-platform-agent"],
+      "purposes": ["model_review"],
+      "domains": ["ml-platform"],
+      "max_risk_tier": 2
+    },
+    {
+      "id": "ml-engineer-notify-owner",
+      "effect": "allow",
+      "description": "ML engineers may notify a model owner about a review finding",
+      "capabilities": ["notify_model_owner"],
+      "principal_roles": ["ml-engineer", "ml-platform-agent"],
+      "purposes": ["model_review"],
+      "domains": ["ml-platform"],
+      "max_risk_tier": 3,
+      "min_auth_strength": 2,
+      "obligations": ["redact_protected_fields"]
+    },
+    {
+      "id": "model-risk-promotion",
+      "effect": "allow",
+      "description": "Only model risk approvers may promote a model version to production",
+      "capabilities": ["promote_model_to_production"],
+      "principal_roles": ["model-risk-approver"],
+      "purposes": ["model_promotion"],
+      "domains": ["ml-platform"],
+      "max_risk_tier": 4,
+      "min_auth_strength": 3
+    },
+    {
+      "id": "no-promotion-from-review-purpose",
+      "effect": "deny",
+      "reason_code": "purpose_mismatch",
+      "description": "A run authorised to review a model may not promote one; purpose-of-use is a boundary, not a label",
+      "capabilities": ["promote_model_to_production"],
+      "purposes": ["model_review"]
+    }
+  ],
+  "tier_posture": {},
+  "thresholds": {}
+}

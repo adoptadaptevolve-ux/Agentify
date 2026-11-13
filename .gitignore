@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+# Local run state: evidence ledgers, checkpoints and approval queues written by
+# the file-backed reference implementations. Never commit these -- they can hold
+# protected argument payloads.
+.causeway/
+*.ledger.jsonl

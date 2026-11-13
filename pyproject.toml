@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "causeway"
+version = "0.1.0"
+description = "An enterprise paved road for agentic AI: models reason, the platform authorizes."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "calm-trader" }]
+keywords = ["agents", "llm", "governance", "policy", "evidence", "system-one"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Typing :: Typed",
+]
+
+# The core platform has no required third-party dependencies. Everything it
+# needs to enforce its invariants -- canonical encoding, hashing, signing,
+# the evidence chain -- is in the standard library, so the trust-critical path
+# has no supply chain of its own. See docs/decisions/0006-zero-dependency-core.md
+dependencies = []
+
+[project.optional-dependencies]
+# The hosted System One judgment plane. Without it the platform falls back to
+# the offline judge, so tests and the local sandbox never need a network.
+systemone = ["typesafe-sdk>=0.1"]
+dev = [
+  "pytest>=8.0",
+  "mypy>=1.10",
+  "ruff>=0.5",
+]
+
+[project.scripts]
+causeway = "causeway.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/calm-trader/agentic-ai-platform"
+Documentation = "https://github.com/calm-trader/agentic-ai-platform/tree/main/docs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/causeway"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+filterwarnings = ["error"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "capabilities"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src/causeway"]
+warn_unreachable = true

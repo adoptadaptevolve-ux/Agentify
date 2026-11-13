@@ -1,0 +1,51 @@
+{
+  "name": "platform-baseline",
+  "version": "2026.09.18",
+  "description": "The controls every capability inherits from its risk tier. Grants nothing on its own: a domain pack must allow an action before it can happen, so an unrouted capability default-denies.",
+  "hard_deny_capabilities": [],
+  "rules": [],
+  "tier_posture": {
+    "0": {
+      "obligations": [],
+      "min_auth_strength": 1
+    },
+    "1": {
+      "obligations": [],
+      "min_auth_strength": 1
+    },
+    "2": {
+      "obligations": ["require_idempotency_key", "verify_after_execute"],
+      "min_auth_strength": 1,
+      "review_queue": "platform-review"
+    },
+    "3": {
+      "obligations": [
+        "require_idempotency_key",
+        "verify_after_execute",
+        "emit_enhanced_evidence"
+      ],
+      "min_auth_strength": 2,
+      "review_queue": "platform-review"
+    },
+    "4": {
+      "obligations": [
+        "require_human_approval",
+        "require_dual_control",
+        "require_step_up_auth",
+        "require_attested_workload",
+        "verify_after_execute",
+        "emit_enhanced_evidence"
+      ],
+      "min_auth_strength": 3,
+      "requires_attested_workload": true,
+      "review_queue": "model-risk-queue"
+    }
+  },
+  "thresholds": {
+    "injection_deny": 0.7,
+    "egress_deny": 0.6,
+    "board_block_review": 0.5,
+    "min_decision_confidence": 0.5,
+    "groundedness_floor": 0.6
+  }
+}
