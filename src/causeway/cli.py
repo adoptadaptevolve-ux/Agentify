@@ -280,6 +280,32 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return 0 if report.passed else 1
 
 
+def cmd_keygen(args: argparse.Namespace) -> int:
+    """Generate an Ed25519 key pair for signing delegation envelopes."""
+    import os
+
+    from .authority.ed25519 import Ed25519Signer
+
+    out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    private_path = out / f"{args.key_id}.private.pem"
+    public_path = out / f"{args.key_id}.public.pem"
+    for path in (private_path, public_path):
+        if path.exists():
+            print(f"refusing to overwrite {path}", file=sys.stderr)
+            return 1
+    signer = Ed25519Signer.generate(args.key_id)
+    # Create the private key file with owner-only permissions from the start,
+    # rather than writing it world-readable and tightening it afterwards.
+    fd = os.open(private_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(signer.private_pem())
+    public_path.write_bytes(signer.public_pem())
+    print(f"private key : {private_path}  (keep in a secret store; give only to the issuer)")
+    print(f"public key  : {public_path}  (give to every service that verifies envelopes)")
+    return 0
+
+
 def cmd_tiers(args: argparse.Namespace) -> int:
     """Print the risk tiers and what each one means."""
     for tier in RiskTier:
@@ -353,6 +379,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate.add_argument("--out", help="write the full JSON report here")
     evaluate.set_defaults(func=cmd_eval)
+
+    keygen = subparsers.add_parser(
+        "keygen", help="generate an Ed25519 key pair for signing delegation envelopes"
+    )
+    keygen.add_argument("--key-id", required=True, help="identifier recorded on signatures")
+    keygen.add_argument("--out-dir", default=".", help="where to write the two PEM files")
+    keygen.set_defaults(func=cmd_keygen)
 
     verify = subparsers.add_parser("verify-evidence", help="re-verify a JSONL evidence chain")
     verify.add_argument("ledger")

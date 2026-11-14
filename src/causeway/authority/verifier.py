@@ -17,7 +17,7 @@ from ..errors import (
     ReplayDetected,
     SignatureInvalid,
 )
-from .signer import Signer
+from .signer import SignatureVerifier
 
 CLOCK_LEEWAY = timedelta(seconds=30)
 """Tolerance for clock skew between the minting and verifying services. Kept
@@ -55,11 +55,14 @@ class DelegationVerifier:
 
     def __init__(
         self,
-        signer: Signer,
+        signer: SignatureVerifier,
         *,
         nonce_store: NonceStore | None = None,
         leeway: timedelta = CLOCK_LEEWAY,
     ) -> None:
+        # Only a verifier is needed here. With an asymmetric algorithm this is
+        # built from public keys, so a verifying service holds nothing that
+        # could mint an envelope.
         self._signer = signer
         self._nonces = nonce_store or NonceStore()
         self._leeway = leeway
@@ -81,6 +84,15 @@ class DelegationVerifier:
         moment = now or datetime.now(UTC)
         body = presented.body
 
+        if presented.algorithm != self._signer.algorithm:
+            # Never check a signature with an algorithm the envelope did not
+            # claim, or claimed an algorithm this verifier does not use: that
+            # mismatch is the classic route to a forged token being accepted.
+            raise SignatureInvalid(
+                f"delegation {body.delegation_id} is signed with "
+                f"{presented.algorithm!r}; this verifier only accepts "
+                f"{self._signer.algorithm!r}"
+            )
         if not self._signer.verify(body, presented.signature, presented.key_id):
             raise SignatureInvalid(
                 f"delegation {body.delegation_id} failed signature verification"

@@ -13,3 +13,4 @@ costs**. A record with no cost section is a record that has not been thought thr
 | [0006](0006-zero-dependency-core.md) | A zero-dependency trust-critical core | Accepted |
 | [0007](0007-offline-judge-by-default.md) | The offline judge is the default | Accepted |
 | [0008](0008-policy-as-a-signed-artifact.md) | Policy as a versioned, signed artifact | Accepted |
+| [0009](0009-asymmetric-signing-as-an-optional-extra.md) | Asymmetric signing as an optional extra | Accepted |

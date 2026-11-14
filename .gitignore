@@ -16,3 +16,6 @@ htmlcov/
 # protected argument payloads.
 .causeway/
 *.ledger.jsonl
+
+# Private signing keys belong in a secret store, never in the repository.
+*.private.pem

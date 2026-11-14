@@ -20,7 +20,7 @@ from os import PathLike
 from typing import TYPE_CHECKING
 
 from ..authority.issuer import DelegationIssuer
-from ..authority.signer import HmacSigner, Signer
+from ..authority.signer import HmacSigner, SignatureVerifier, Signer
 from ..authority.verifier import DelegationVerifier, NonceStore
 from ..contracts.delegation import Constraints
 from ..contracts.identity import Principal, WorkloadIdentity
@@ -79,6 +79,7 @@ class Platform:
         capabilities: list[Capability] | None = None,
         judge: SystemOne | None = None,
         signer: Signer | None = None,
+        signature_verifier: SignatureVerifier | None = None,
         ledger: EvidenceLedger | None = None,
         credentials: CredentialBroker | None = None,
         models: ModelCatalog | None = None,
@@ -90,6 +91,10 @@ class Platform:
         This is what a developer gets from ``causeway init`` and what CI runs.
         Its behaviour is identical to production on every control path; only
         the backing stores differ.
+
+        Pass an asymmetric ``signer`` (e.g. ``Ed25519Signer``) to separate minting
+        from checking. The delegation verifier then uses ``signer.verifier()``,
+        the public half, unless ``signature_verifier`` is given explicitly.
 
         Pass ``state_path`` to keep approvals, idempotency keys and delegation
         nonces in a SQLite file instead of memory. A platform rebuilt on the
@@ -113,7 +118,14 @@ class Platform:
             approvals = HumanDecisionService(store=SqliteApprovalStore(state))
             idempotency = SqliteIdempotencyStore(state)
             nonces = SqliteNonceStore(state)
-        verifier = DelegationVerifier(active_signer, nonce_store=nonces)
+        checker: SignatureVerifier
+        if signature_verifier is not None:
+            checker = signature_verifier
+        elif callable(getattr(active_signer, "verifier", None)):
+            checker = active_signer.verifier()  # type: ignore[attr-defined]
+        else:
+            checker = active_signer
+        verifier = DelegationVerifier(checker, nonce_store=nonces)
         return Platform(
             registry=registry,
             policy=engine,

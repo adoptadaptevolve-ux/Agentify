@@ -50,15 +50,29 @@ The envelope **body** is what is signed and hashed. Signatures live outside it i
 `SignedDelegation`, so the body digest stays stable and can serve as the `parent_hash` of
 the next link in the chain.
 
-The reference `HmacSigner` is right for a prototype and wrong for production: a symmetric
-key means any service that can verify can also mint. Production implements the `Signer`
-protocol against an HSM, KMS or workload-identity signing service, so minting authority
-is a separate trust domain from verifying services. `key_id` travels with every
-signature, so keys rotate without invalidating live envelopes.
+Signing and checking are separate roles. A `Signer` mints; a `SignatureVerifier` only
+checks, and the `DelegationVerifier` every service runs is given nothing more than that.
+
+* **`HmacSigner` (HS256)** is the sandbox default. One shared secret both signs and checks,
+  so any service that can verify can also mint. Right for tests and a single-process
+  prototype, wrong for production.
+* **`Ed25519Signer` (EdDSA)** separates them. The issuer holds a private key; verifying
+  services hold an `Ed25519Verifier` built from the public key alone, which cannot sign. A
+  break-in at a verifier yields nothing that can issue authority. `causeway keygen` creates
+  a key pair; needs the optional `signing` extra.
+* **`ExternalEd25519Signer`** is the plug-in point for a cloud KMS or HSM: the private key
+  never enters the process, and connecting a vault is one function that signs bytes. Its
+  output is checked against the vault's public key before an envelope is minted.
+
+`key_id` travels with every signature, so keys rotate without invalidating live envelopes.
+The envelope's `algorithm` is checked before its signature: a verifier refuses any envelope
+not signed with the one algorithm it uses, which closes the classic route to a forged token
+being checked the wrong way.
 
 ## Verification, in order
 
-1. **Signature** — every other field is only meaningful once the envelope is authentic.
+1. **Algorithm, then signature** — every other field is only meaningful once the envelope
+   is authentic, and it is checked only with the one algorithm this verifier uses.
 2. **Validity window**, with a deliberately small clock leeway. A large leeway extends the
    life of a revoked or spent envelope.
 3. **Audience** — an envelope minted for the tool gateway cannot be spent elsewhere.
