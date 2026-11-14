@@ -14,7 +14,8 @@ this proposed change actually do, and can risk review the rules without reading 
 ## Decision
 
 A `PolicyPack` is a data artifact: a name, a version, rules, tier postures, thresholds and a
-hard-deny list. It loads from JSON, carries a digest, and can be HMAC-signed.
+hard-deny list. It loads from JSON, carries a digest, and is signed: HMAC in the sandbox, Ed25519
+in production so nodes that verify a pack cannot forge one ([ADR 0009](0009-asymmetric-signing-as-an-optional-extra.md)).
 
 The engine that evaluates it is **pure** — intent, delegation, capability and signals in, a
 decision out, no I/O.

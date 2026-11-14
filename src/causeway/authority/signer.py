@@ -20,13 +20,16 @@ import secrets
 from typing import Protocol, runtime_checkable
 
 from ..canonical import canonical_bytes
-from ..contracts.delegation import Delegation
 from ..errors import ConfigurationError
 
 
 @runtime_checkable
 class SignatureVerifier(Protocol):
-    """Checks signatures over delegation bodies. Cannot mint them.
+    """Checks signatures over signed artifacts. Cannot mint them.
+
+    An artifact is anything the canonical encoder accepts: a delegation body,
+    or a policy pack wrapped in its signing context. Signatures cover the
+    canonical encoding, never the bytes that arrived on the wire.
 
     This is all a verifying service should hold. With an asymmetric algorithm
     it is built from public keys only, so compromising a verifier yields
@@ -38,21 +41,21 @@ class SignatureVerifier(Protocol):
         """The only algorithm this verifier accepts."""
         ...
 
-    def verify(self, body: Delegation, signature: str, key_id: str) -> bool:
+    def verify(self, body: object, signature: str, key_id: str) -> bool:
         """Whether ``signature`` is valid for ``body`` under ``key_id``."""
         ...
 
 
 @runtime_checkable
 class Signer(SignatureVerifier, Protocol):
-    """Mints signatures over delegation bodies, and can check its own."""
+    """Mints signatures over signed artifacts, and can check its own."""
 
     @property
     def active_key_id(self) -> str:
         """The key new signatures are minted with."""
         ...
 
-    def sign(self, body: Delegation) -> tuple[str, str]:
+    def sign(self, body: object) -> tuple[str, str]:
         """Return ``(signature, key_id)`` for ``body``."""
         ...
 
@@ -91,12 +94,12 @@ class HmacSigner:
             raise ConfigurationError(f"cannot rotate to unknown key {key_id!r}")
         self._active_key_id = key_id
 
-    def sign(self, body: Delegation) -> tuple[str, str]:
+    def sign(self, body: object) -> tuple[str, str]:
         """Return ``(signature, key_id)`` for ``body``."""
         key_id = self._active_key_id
         return self._mac(body, key_id), key_id
 
-    def verify(self, body: Delegation, signature: str, key_id: str) -> bool:
+    def verify(self, body: object, signature: str, key_id: str) -> bool:
         """Whether ``signature`` is valid for ``body`` under ``key_id``."""
         secret = self._keys.get(key_id)
         if secret is None:
@@ -105,6 +108,6 @@ class HmacSigner:
         # Constant-time comparison: a timing oracle here would leak the MAC.
         return hmac.compare_digest(self._mac(body, key_id), signature)
 
-    def _mac(self, body: Delegation, key_id: str) -> str:
+    def _mac(self, body: object, key_id: str) -> str:
         secret = self._keys[key_id]
         return hmac.new(secret, canonical_bytes(body), hashlib.sha256).hexdigest()
