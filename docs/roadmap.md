@@ -19,13 +19,15 @@ Honest status. The prototype covers phase 0 and most of phase 1.
 * Workflow runtime: explicit graphs, budgets, checkpoints, pause and resume, cancellation
 * Durable single-host state: SQLite-backed approval, idempotency and nonce stores (`Platform.local(state_path=...)`)
 * Compensation: a failed workflow undoes its completed reversible actions, newest first, through the transaction guard
+* Offline model evaluation: labelled cases, quality gates and regression checks (`causeway eval`)
+* Asymmetric envelope signing: Ed25519, so verifying services cannot mint (`signing` extra)
 * SDK and CLI
 * One golden path end to end: the genAI sparring partner
 
 ## Next — consequential actions
 
 * Replica-shared stores behind the approval queue, idempotency store and nonce store (single-host SQLite stores are built: `causeway.storage`)
-* KMS/HSM `Signer` implementation
+* A cloud KMS/HSM adapter behind `ExternalEd25519Signer`, and Ed25519 for policy-pack signatures
 * Semantic egress broker with format-aware DLP, beyond the current typed egress questions
 * Red-team automation: an injection corpus run against every registered capability in CI
 
@@ -36,8 +38,7 @@ Honest status. The prototype covers phase 0 and most of phase 1.
 * Entitlement-aware retrieval caching with correct invalidation
 * Cost routing by risk and capability
 * Self-service onboarding and fleet governance
-* The offline eval harness named in [10 Operations](architecture/10-operations.md) — currently
-  the largest gap, because a green test suite says nothing about model quality
+* A larger eval dataset, harvested from production judgments rather than hand-written
 
 ## Later — research
 

@@ -23,3 +23,7 @@ jobs:
       - run: python -m pytest -q
       # The golden path must stay runnable with no API key and no network.
       - run: python examples/run_sparring_partner.py
+      # The eval dataset must stay valid, and a change that makes the offline
+      # judge worse at the platform's own questions must be noticed. Model
+      # quality itself is measured by the scheduled eval workflow.
+      - run: python -m causeway.cli eval evals/cases --judge sandbox --baseline evals/baselines/sandbox.json

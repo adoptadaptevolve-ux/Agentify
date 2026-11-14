@@ -67,5 +67,10 @@ injection, tool chaining, delegation abuse, exfiltration, poisoned retrieval, pr
 escalation), operational behaviour (latency, retry, dependency failure, idempotency,
 rollback) and production telemetry (drift, denials, human corrections, near-misses).
 
-The falsification suites in `verify/` are the runtime half of this. The offline harness that
-runs them against recorded cases on a schedule is not built.
+The falsification suites in `verify/` are the runtime half of this. The offline half is
+`causeway.evals`: it replays labelled cases against the judgment model, scores the answers
+(accuracy, Brier score, calibration, miss rate, undecided rate), checks them against gates a
+risk owner sets, and flags regressions against a previous run. It runs weekly against the
+hosted model. See [Evaluate models](../guides/evaluate-models.md). Its seed dataset covers the
+injection guardrail and the sparring partner's falsifiers; the rest of the list above is still
+an outline.

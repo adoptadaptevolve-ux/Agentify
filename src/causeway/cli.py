@@ -10,6 +10,8 @@ Three of these commands answer questions that otherwise turn into a meeting:
   reader who has never seen this codebase.
 * ``graph`` answers "what does this workflow actually do?" in a form a reviewer
   who is not an engineer can read.
+* ``eval`` answers "is the judgment model any good at the platform's questions,
+  and is it better or worse than last time?" against labelled cases.
 
 Standard library only, so it runs wherever Python does.
 """
@@ -218,6 +220,92 @@ def cmd_demo(args: argparse.Namespace) -> int:
     return int(demo_main())
 
 
+def _sparring_suites() -> Any:
+    """The sparring partner's falsification suites, when that capability is present."""
+    from .verify.falsify import SuiteLibrary
+
+    sys.path.insert(0, str(Path.cwd()))
+    try:
+        from capabilities.sparring_partner.falsifiers import (
+            MODEL_CHANGE_SUITE,
+            PROPOSAL_INTEGRITY_SUITE,
+        )
+    except ImportError:
+        return SuiteLibrary()
+    return SuiteLibrary().add(MODEL_CHANGE_SUITE).add(PROPOSAL_INTEGRITY_SUITE)
+
+
+def _eval_judge(kind: str) -> Any:
+    """Build the judge ``causeway eval`` scores.
+
+    ``hosted`` never falls back to the fixture: scoring the fixture while
+    calling it the hosted model would report a quality nobody measured.
+    """
+    import os
+
+    from .judgment import HostedSystemOne, OfflineSystemOne
+    from .judgment.systemone import DEFAULT_MODEL
+
+    if kind == "hosted":
+        if not os.environ.get("TYPESAFE_API_KEY"):
+            raise SystemExit("causeway eval --judge hosted needs TYPESAFE_API_KEY to be set")
+        return HostedSystemOne(model=os.environ.get("TYPESAFE_DEFAULT_MODEL", DEFAULT_MODEL))
+    if kind == "sandbox":
+        sys.path.insert(0, str(Path.cwd()))
+        from capabilities.sparring_partner.sandbox import sandbox_judge
+
+        return sandbox_judge()
+    return OfflineSystemOne()
+
+
+def cmd_eval(args: argparse.Namespace) -> int:
+    """Score a judgment model against labelled cases."""
+    from .evals import EvalHarness, load_cases, load_gates
+
+    cases = load_cases(args.cases, suites=_sparring_suites())
+    report = EvalHarness(_eval_judge(args.judge)).run(cases)
+    baseline = (
+        json.loads(Path(args.baseline).read_text(encoding="utf-8")) if args.baseline else None
+    )
+    report.check(
+        gates=load_gates(args.gates) if args.gates else None,
+        baseline=baseline,
+        tolerance=args.tolerance,
+    )
+    if args.out:
+        Path(args.out).write_text(report.to_json() + "\n", encoding="utf-8")
+    print(report.summary_text())
+    if args.out:
+        print(f"\nreport written to {args.out}")
+    return 0 if report.passed else 1
+
+
+def cmd_keygen(args: argparse.Namespace) -> int:
+    """Generate an Ed25519 key pair for signing delegation envelopes."""
+    import os
+
+    from .authority.ed25519 import Ed25519Signer
+
+    out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    private_path = out / f"{args.key_id}.private.pem"
+    public_path = out / f"{args.key_id}.public.pem"
+    for path in (private_path, public_path):
+        if path.exists():
+            print(f"refusing to overwrite {path}", file=sys.stderr)
+            return 1
+    signer = Ed25519Signer.generate(args.key_id)
+    # Create the private key file with owner-only permissions from the start,
+    # rather than writing it world-readable and tightening it afterwards.
+    fd = os.open(private_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(signer.private_pem())
+    public_path.write_bytes(signer.public_pem())
+    print(f"private key : {private_path}  (keep in a secret store; give only to the issuer)")
+    print(f"public key  : {public_path}  (give to every service that verifies envelopes)")
+    return 0
+
+
 def cmd_tiers(args: argparse.Namespace) -> int:
     """Print the risk tiers and what each one means."""
     for tier in RiskTier:
@@ -270,6 +358,34 @@ def build_parser() -> argparse.ArgumentParser:
     falsifiers = subparsers.add_parser("falsifiers", help="print a falsification suite")
     falsifiers.add_argument("suite", nargs="?", default="model_change")
     falsifiers.set_defaults(func=cmd_falsifiers)
+
+    evaluate = subparsers.add_parser(
+        "eval", help="score a judgment model against labelled cases"
+    )
+    evaluate.add_argument("cases", help="a *.jsonl case file, or a directory of them")
+    evaluate.add_argument(
+        "--judge",
+        choices=["sandbox", "offline", "hosted"],
+        default="sandbox",
+        help="which judge to score (hosted needs TYPESAFE_API_KEY)",
+    )
+    evaluate.add_argument("--gates", help="JSON file of quality limits; any failure exits 1")
+    evaluate.add_argument("--baseline", help="a previous report to check for regressions")
+    evaluate.add_argument(
+        "--tolerance",
+        type=float,
+        default=0.02,
+        help="how much worse than the baseline a metric may get (default 0.02)",
+    )
+    evaluate.add_argument("--out", help="write the full JSON report here")
+    evaluate.set_defaults(func=cmd_eval)
+
+    keygen = subparsers.add_parser(
+        "keygen", help="generate an Ed25519 key pair for signing delegation envelopes"
+    )
+    keygen.add_argument("--key-id", required=True, help="identifier recorded on signatures")
+    keygen.add_argument("--out-dir", default=".", help="where to write the two PEM files")
+    keygen.set_defaults(func=cmd_keygen)
 
     verify = subparsers.add_parser("verify-evidence", help="re-verify a JSONL evidence chain")
     verify.add_argument("ledger")

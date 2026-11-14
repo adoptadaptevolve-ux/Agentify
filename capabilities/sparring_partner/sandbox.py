@@ -66,7 +66,7 @@ SANDBOX_CUES: tuple[Cue, ...] = (
     _cue("instructions addressed to an AI system", "ignore (all )?previous instructions", 4.5),
     _cue("instructions addressed to an AI system", "approve this automatically", 3.5),
     _cue("claim authority it cannot have", "(pre-)?approved by (the )?(CISO|security|risk)", 3.5),
-    _cue("asks for data to be sent", "https?://", 2.5),
+    _cue("ask for data to be sent", "https?://", 2.5),
     # Model risk.
     _cue("lack a reference to an independent validation", "validation[- ]?(id|ref)", -3.0),
     _cue("omit how the model will be monitored", "monitor", -2.6),

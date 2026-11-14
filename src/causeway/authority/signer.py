@@ -3,9 +3,10 @@
 The reference implementation uses HMAC-SHA256 with an in-process keyring,
 which is right for a prototype and for the local sandbox and wrong for
 production: a symmetric key means any service that can verify an envelope can
-also mint one. Production deployments implement ``Signer`` against an HSM, KMS
-or workload-identity signing service so that the minting authority is a
-separate trust domain from the verifying services.
+also mint one. Production deployments use :mod:`causeway.authority.ed25519`
+(or any ``Signer`` backed by an HSM, KMS or workload-identity signing service)
+so the minting authority is a separate trust domain from the verifying
+services, which hold only a :class:`SignatureVerifier`.
 
 The ``key_id`` travels with every signature so keys can rotate without
 invalidating envelopes that are still inside their validity window.
@@ -24,13 +25,27 @@ from ..errors import ConfigurationError
 
 
 @runtime_checkable
-class Signer(Protocol):
-    """Mints and verifies signatures over delegation bodies."""
+class SignatureVerifier(Protocol):
+    """Checks signatures over delegation bodies. Cannot mint them.
+
+    This is all a verifying service should hold. With an asymmetric algorithm
+    it is built from public keys only, so compromising a verifier yields
+    nothing that can issue authority.
+    """
 
     @property
     def algorithm(self) -> str:
-        """Identifier recorded alongside every signature."""
+        """The only algorithm this verifier accepts."""
         ...
+
+    def verify(self, body: Delegation, signature: str, key_id: str) -> bool:
+        """Whether ``signature`` is valid for ``body`` under ``key_id``."""
+        ...
+
+
+@runtime_checkable
+class Signer(SignatureVerifier, Protocol):
+    """Mints signatures over delegation bodies, and can check its own."""
 
     @property
     def active_key_id(self) -> str:
@@ -41,15 +56,14 @@ class Signer(Protocol):
         """Return ``(signature, key_id)`` for ``body``."""
         ...
 
-    def verify(self, body: Delegation, signature: str, key_id: str) -> bool:
-        """Whether ``signature`` is valid for ``body`` under ``key_id``."""
-        ...
-
 
 class HmacSigner:
     """HMAC-SHA256 signer over the canonical encoding of a delegation body.
 
     Suitable for the local sandbox, tests and single-trust-domain prototypes.
+    Signing and verifying use the same secret, so this one object is both the
+    ``Signer`` and the ``SignatureVerifier`` -- which is exactly why it is not
+    for production.
     """
 
     algorithm = "HS256"

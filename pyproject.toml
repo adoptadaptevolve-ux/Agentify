@@ -30,7 +30,10 @@ dependencies = []
 # The hosted System One judgment plane. Without it the platform falls back to
 # the offline judge, so tests and the local sandbox never need a network.
 systemone = ["typesafe-sdk>=0.1"]
+# Ed25519 envelope signing, so verifying services hold public keys only.
+signing = ["cryptography>=42"]
 dev = [
+  "cryptography>=42",
   "pytest>=8.0",
   "mypy>=1.10",
   "ruff>=0.5",
