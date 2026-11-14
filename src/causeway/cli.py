@@ -40,17 +40,64 @@ def _load_packs(paths: list[str]) -> PolicyPack:
     return compose(*packs, name="composed", version="cli")
 
 
-def _sparring_platform(pack_paths: list[str]) -> Platform:
+def _load_policy(args: argparse.Namespace) -> Any:
+    """Load the command line's packs with provenance, checking signatures if a key is given."""
+    from .policy.trust import load_policy
+
+    verifier = None
+    if args.policy_key:
+        from .authority.ed25519 import Ed25519Verifier
+
+        verifier = Ed25519Verifier.from_public_pem(
+            {args.policy_key_id: Path(args.policy_key).read_bytes()}
+        )
+    return load_policy(
+        args.pack,
+        verifier=verifier,
+        require_signed=args.require_signed_policy,
+        name="composed",
+        version="cli",
+    )
+
+
+def cmd_policy_status(args: argparse.Namespace) -> int:
+    """Show where the policy comes from and whether each pack is verified."""
+    from .errors import SignatureInvalid
+    from .policy.trust import signed_policy_required
+
+    strict = args.require_signed_policy or signed_policy_required()
+    print(f"signed policy required: {'yes' if strict else 'no'}")
+    try:
+        loaded = _load_policy(args)
+    except SignatureInvalid as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+    for source in loaded.sources:
+        print(f"  {source.describe()}")
+    print(f"effective policy: {loaded.pack.name}@{loaded.pack.version} "
+          f"({short(loaded.pack.artifact_digest)})")
+    return 0 if loaded.fully_verified or not strict else 2
+
+
+def _sparring_platform(pack_paths: list[str], args: argparse.Namespace | None = None) -> Platform:
     """Build the sandbox platform the demo commands operate on."""
     sys.path.insert(0, str(Path.cwd()))
     from capabilities.sparring_partner.capabilities import SPARRING_CAPABILITIES
     from capabilities.sparring_partner.sandbox import ML_STANDARDS, sandbox_judge
 
-    platform = Platform.local(
-        pack=_load_packs(pack_paths),
-        capabilities=list(SPARRING_CAPABILITIES),
-        judge=sandbox_judge(),
-    )
+    if args is not None:
+        platform = Platform.local(
+            policy=_load_policy(args),
+            require_signed_policy=args.require_signed_policy,
+            capabilities=list(SPARRING_CAPABILITIES),
+            judge=sandbox_judge(),
+        )
+    else:
+        platform = Platform.local(
+            pack=_load_packs(pack_paths),
+            capabilities=list(SPARRING_CAPABILITIES),
+            judge=sandbox_judge(),
+        )
     for chunk in ML_STANDARDS:
         platform.retrieval.ingest(chunk)
     return platform
@@ -76,7 +123,13 @@ def cmd_capabilities(args: argparse.Namespace) -> int:
 
 def cmd_policy_simulate(args: argparse.Namespace) -> int:
     """Answer "would this be allowed?" through the real decision path."""
-    platform = _sparring_platform(args.pack)
+    from .errors import SignatureInvalid
+
+    try:
+        platform = _sparring_platform(args.pack, args)
+    except SignatureInvalid as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
     capability = platform.registry.get(args.capability)
 
     principal = Principal(
@@ -118,6 +171,8 @@ def cmd_policy_simulate(args: argparse.Namespace) -> int:
     print(f"reason code  : {decision.reason_code}")
     print(f"tier reached : {decision.tier_reached.name}")
     print(f"policy       : {decision.policy_version}")
+    for source in platform.policy_sources:
+        print(f"  pack       : {source.describe()}")
     print(f"obligations  : {', '.join(sorted(o.value for o in decision.obligations)) or 'none'}")
     print(f"signals      : {decision.signals or 'none'}")
     print(f"action digest: {short(decision.action_digest)}")
@@ -359,6 +414,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="policy pack to load; repeat to compose (default: policies/*.json)",
     )
+    parser.add_argument(
+        "--require-signed-policy",
+        action="store_true",
+        help="refuse to run unless every pack is signed and verifies "
+        "(also forced by CAUSEWAY_REQUIRE_SIGNED_POLICY=1)",
+    )
+    parser.add_argument("--policy-key", help="public key PEM that policy packs must verify against")
+    parser.add_argument("--policy-key-id", default="policy", help="key id of --policy-key")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("capabilities", help="list registered capabilities").set_defaults(
@@ -387,6 +450,10 @@ def build_parser() -> argparse.ArgumentParser:
     simulate.add_argument("--destination")
     simulate.add_argument("--signal", action="append", default=[], metavar="NAME=VALUE")
     simulate.set_defaults(func=cmd_policy_simulate)
+
+    subparsers.add_parser(
+        "policy-status", help="show where policy comes from and whether it is signed"
+    ).set_defaults(func=cmd_policy_status)
 
     falsifiers = subparsers.add_parser("falsifiers", help="print a falsification suite")
     falsifiers.add_argument("suite", nargs="?", default="model_change")
@@ -453,7 +520,18 @@ def main(argv: list[str] | None = None) -> int:
         args.pack = [
             str(path) for path in sorted(Path("policies").glob("*.json"))
         ] or ["policies/platform-baseline.json"]
-    return int(args.func(args))
+    from .errors import ConfigurationError, SignatureInvalid
+
+    try:
+        return int(args.func(args))
+    except SignatureInvalid as exc:
+        # Strict policy refused something. Say so plainly and exit non-zero;
+        # never fall back to running with unverified policy.
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+    except ConfigurationError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

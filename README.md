@@ -249,8 +249,9 @@ Honest list of what is a reference implementation here and needs replacing:
 - **Signing** defaults to HMAC, where any verifier can also mint. Production uses
   `Ed25519Signer` (`pip install 'causeway[signing]'`), so verifying services hold only public
   keys, for delegation envelopes and policy packs alike (`causeway sign-pack` /
-  `verify-pack`). A cloud KMS or HSM plugs in through `ExternalEd25519Signer`; no vault
-  adapter ships yet.
+  `verify-pack`). Set `CAUSEWAY_REQUIRE_SIGNED_POLICY=1` and a deployment refuses to run on
+  any policy that is not signed and verified. A cloud KMS or HSM plugs in through
+  `ExternalEd25519Signer`; no vault adapter ships yet.
 - **Evidence** is in-memory or single-node JSONL. Production needs append-only storage
   with independent retention and an external anchor.
 - **Approvals, idempotency and nonces** are in-memory by default. Pass

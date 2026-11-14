@@ -21,6 +21,7 @@ Honest status. The prototype covers phase 0 and most of phase 1.
 * Compensation: a failed workflow undoes its completed reversible actions, newest first, through the transaction guard
 * Offline model evaluation: labelled cases, quality gates and regression checks (`causeway eval`)
 * Asymmetric signing for envelopes and policy packs: Ed25519, so verifying nodes cannot mint (`signing` extra)
+* Mandatory signed policy: `CAUSEWAY_REQUIRE_SIGNED_POLICY=1` refuses unsigned, unknown-key or edited packs
 * SDK and CLI
 * One golden path end to end: the genAI sparring partner
 
