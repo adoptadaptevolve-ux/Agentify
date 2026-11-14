@@ -29,7 +29,6 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from ..canonical import canonical_bytes
-from ..contracts.delegation import Delegation
 from ..errors import ConfigurationError
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -99,7 +98,7 @@ class Ed25519Verifier:
         """Trust another public key, e.g. ahead of a rotation."""
         self._keys[key_id] = public_key
 
-    def verify(self, body: Delegation, signature: str, key_id: str) -> bool:
+    def verify(self, body: object, signature: str, key_id: str) -> bool:
         """Whether ``signature`` is valid for ``body`` under ``key_id``.
 
         Every failure -- unknown key, malformed or wrong-length signature, bad
@@ -168,12 +167,12 @@ class Ed25519Signer:
             raise ConfigurationError(f"cannot rotate to unknown key {key_id!r}")
         self._active_key_id = key_id
 
-    def sign(self, body: Delegation) -> tuple[str, str]:
+    def sign(self, body: object) -> tuple[str, str]:
         """Return ``(signature, key_id)`` for ``body``."""
         key_id = self._active_key_id
         return _encode(self._keys[key_id].sign(canonical_bytes(body))), key_id
 
-    def verify(self, body: Delegation, signature: str, key_id: str) -> bool:
+    def verify(self, body: object, signature: str, key_id: str) -> bool:
         """Whether ``signature`` is valid for ``body`` under ``key_id``."""
         return self.verifier().verify(body, signature, key_id)
 
@@ -226,7 +225,7 @@ class ExternalEd25519Signer:
         """The vault key every signature is minted with."""
         return self._key_id
 
-    def sign(self, body: Delegation) -> tuple[str, str]:
+    def sign(self, body: object) -> tuple[str, str]:
         """Have the external key sign ``body``, and check the result before use."""
         signature = _encode(self._sign_bytes(canonical_bytes(body)))
         if not self._verifier.verify(body, signature, self._key_id):
@@ -238,7 +237,7 @@ class ExternalEd25519Signer:
             )
         return signature, self._key_id
 
-    def verify(self, body: Delegation, signature: str, key_id: str) -> bool:
+    def verify(self, body: object, signature: str, key_id: str) -> bool:
         """Whether ``signature`` is valid for ``body`` under ``key_id``."""
         return self._verifier.verify(body, signature, key_id)
 

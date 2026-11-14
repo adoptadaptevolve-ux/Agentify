@@ -306,6 +306,39 @@ def cmd_keygen(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sign_pack(args: argparse.Namespace) -> int:
+    """Sign a policy pack with an Ed25519 private key (run in the control plane)."""
+    from .authority.ed25519 import Ed25519Signer
+    from .policy.pack import SIGNATURE_SUFFIX, sign_pack
+
+    signer = Ed25519Signer.from_private_pem(
+        {args.key_id: Path(args.private_key).read_bytes()}, args.key_id
+    )
+    pack_path = Path(args.pack_file)
+    signature = sign_pack(load_pack(pack_path), signer)
+    out = Path(args.out) if args.out else pack_path.with_name(pack_path.name + SIGNATURE_SUFFIX)
+    out.write_text(signature.to_json() + "\n", encoding="utf-8")
+    print(f"signed {signature.pack_name}@{signature.pack_version} with {signature.key_id}")
+    print(f"signature : {out}")
+    return 0
+
+
+def cmd_verify_pack(args: argparse.Namespace) -> int:
+    """Check a policy pack's detached signature with the public key alone."""
+    from .authority.ed25519 import Ed25519Verifier
+    from .errors import SignatureInvalid
+    from .policy.pack import load_signed_pack
+
+    verifier = Ed25519Verifier.from_public_pem({args.key_id: Path(args.public_key).read_bytes()})
+    try:
+        pack = load_signed_pack(args.pack_file, verifier, signature_path=args.signature)
+    except SignatureInvalid as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+    print(f"verified {pack.name}@{pack.version} ({short(pack.artifact_digest)})")
+    return 0
+
+
 def cmd_tiers(args: argparse.Namespace) -> int:
     """Print the risk tiers and what each one means."""
     for tier in RiskTier:
@@ -386,6 +419,24 @@ def build_parser() -> argparse.ArgumentParser:
     keygen.add_argument("--key-id", required=True, help="identifier recorded on signatures")
     keygen.add_argument("--out-dir", default=".", help="where to write the two PEM files")
     keygen.set_defaults(func=cmd_keygen)
+
+    sign_pack_cmd = subparsers.add_parser(
+        "sign-pack", help="sign a policy pack with an Ed25519 private key"
+    )
+    sign_pack_cmd.add_argument("pack_file")
+    sign_pack_cmd.add_argument("--private-key", required=True, help="PEM from causeway keygen")
+    sign_pack_cmd.add_argument("--key-id", required=True)
+    sign_pack_cmd.add_argument("--out", help="signature file (default: <pack>.sig.json)")
+    sign_pack_cmd.set_defaults(func=cmd_sign_pack)
+
+    verify_pack_cmd = subparsers.add_parser(
+        "verify-pack", help="check a policy pack's signature with the public key"
+    )
+    verify_pack_cmd.add_argument("pack_file")
+    verify_pack_cmd.add_argument("--public-key", required=True)
+    verify_pack_cmd.add_argument("--key-id", required=True)
+    verify_pack_cmd.add_argument("--signature", help="signature file (default: <pack>.sig.json)")
+    verify_pack_cmd.set_defaults(func=cmd_verify_pack)
 
     verify = subparsers.add_parser("verify-evidence", help="re-verify a JSONL evidence chain")
     verify.add_argument("ledger")

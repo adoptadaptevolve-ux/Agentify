@@ -154,10 +154,33 @@ def test_review_run_cannot_promote(platform, run):
 
 ## Signing
 
-```python
-signature = pack.sign(secret)
-pack.verify(signature, secret)      # raises SignatureInvalid
+Production signs packs in the control plane with a private key, and every execution-plane
+node checks them with the public key alone, so a node that can verify a pack cannot forge
+one. Needs the optional `signing` extra.
+
+```bash
+causeway keygen --key-id cp-1 --out-dir keys/            # once, in the control plane
+causeway sign-pack policies/ml-platform.json --private-key keys/cp-1.private.pem --key-id cp-1
+causeway verify-pack policies/ml-platform.json --public-key keys/cp-1.public.pem --key-id cp-1
 ```
 
-A detached HMAC over the canonical pack encoding. Production signs in the control plane and
-distributes signed bundles, so an execution-plane node can verify a pack it did not build.
+`sign-pack` writes a small detached file next to the pack (`ml-platform.json.sig.json`)
+naming the pack, its version, its digest and the key. On a node, load packs through the
+check rather than around it:
+
+```python
+from causeway.authority import Ed25519Verifier
+from causeway.policy import load_signed_pack
+
+node = Ed25519Verifier.from_public_pem({"cp-1": public_pem_bytes})
+pack = load_signed_pack("policies/ml-platform.json", node)   # raises SignatureInvalid
+```
+
+A missing signature file is a refusal, never a fallback to an unsigned load. A signature for
+one version cannot be presented with another. The signature covers the pack's meaning, not its
+formatting, so re-indenting a signed pack does not break it while relaxing a threshold does.
+Pack signatures carry their own context, so one can never be passed off as a delegation
+signature made with the same key, or the reverse.
+
+`pack.sign(secret)` / `pack.verify(signature, secret)` remain for the sandbox. They are HMAC,
+so anyone who can check one can forge one.

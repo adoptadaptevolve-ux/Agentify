@@ -52,5 +52,7 @@ model as before. Moving the private key into a vault later changes one construct
 * Key custody is now the operator's problem: the private key must live in a secret store,
   and `causeway keygen` refuses to overwrite and writes it owner-readable only, but cannot
   stop it being copied somewhere careless.
-* Policy packs are still HMAC-signed and have the same verify-can-mint property. Moving them
-  to Ed25519 uses the same module and is a follow-up.
+* Policy packs use the same keys and module (`sign_pack`, `load_signed_pack`). Their
+  signatures cover a pack-specific context, so a pack signature and a delegation signature
+  made with one key can never be swapped. Deployments that keep separate keys for the two
+  are still better placed, and nothing stops them.
