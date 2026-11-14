@@ -96,7 +96,7 @@ The board never authorizes anything. It emits two numbers — `board_concern` an
 ```bash
 pip install -e ".[dev]"
 make demo     # the golden path, no API key, no network
-make test     # 70 invariant tests
+make test     # invariant, capability and signing tests (168 at the time of writing)
 ```
 
 The demo runs a genAI **sparring partner**: an agent an ML team uses to stress-test a
