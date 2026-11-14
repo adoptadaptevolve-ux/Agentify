@@ -14,11 +14,22 @@ from .pack import (
     sign_pack,
     verify_pack,
 )
+from .trust import (
+    REQUIRE_SIGNED_ENV,
+    LoadedPolicy,
+    PackSource,
+    enforce_policy_trust,
+    load_policy,
+    signed_policy_required,
+)
 
 __all__ = [
     "ALLOWED_SIGNALS",
     "PACK_SIGNATURE_CONTEXT",
+    "REQUIRE_SIGNED_ENV",
+    "LoadedPolicy",
     "PackSignature",
+    "PackSource",
     "PolicyEngine",
     "PolicyPack",
     "Rule",
@@ -26,8 +37,11 @@ __all__ = [
     "TierPosture",
     "VelocityCounter",
     "compose",
+    "enforce_policy_trust",
     "load_pack",
+    "load_policy",
     "load_signed_pack",
     "sign_pack",
+    "signed_policy_required",
     "verify_pack",
 ]

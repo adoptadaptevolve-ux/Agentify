@@ -182,5 +182,42 @@ formatting, so re-indenting a signed pack does not break it while relaxing a thr
 Pack signatures carry their own context, so one can never be passed off as a delegation
 signature made with the same key, or the reverse.
 
+### Making signatures mandatory
+
+Signing proves nothing unless something checks before the pack runs. Load policy through
+`load_policy`, which verifies every pack that has a signature, records what it found, and in
+strict mode refuses any pack that is unsigned, signed by an unknown key, or edited after
+signing:
+
+```python
+from causeway.policy import load_policy
+from causeway.sdk.platform import Platform
+
+policy = load_policy(["policies/platform-baseline.json", "policies/ml-platform.json"],
+                     verifier=node, require_signed=True)
+platform = Platform.local(policy=policy, require_signed_policy=True, capabilities=...)
+platform.policy_sources     # each pack, whether it verified, and by which key
+```
+
+On a server, set **`CAUSEWAY_REQUIRE_SIGNED_POLICY=1`**. Strict mode then applies everywhere
+and no code path can turn it off: `load_policy` refuses unsigned packs whatever its arguments
+say, and `Platform.local` refuses to start on anything but verified policy, including an
+in-memory pack built by code that never asked for strict mode.
+
+Two rules hold even when signatures are optional: a signature that is present but does not
+verify is a refusal, because a tampered pack is evidence of tampering; and a missing key in
+strict mode is a refusal, never a quiet downgrade.
+
+From the command line:
+
+```bash
+causeway --policy-key keys/cp-1.public.pem --policy-key-id cp-1 --require-signed-policy policy-status
+#   platform-baseline@2026.09.18  signed by cp-1 (EdDSA), verified
+#   ml-platform@2026.09.18        signed by cp-1 (EdDSA), verified
+```
+
+`policy-simulate` prints the same provenance under the decision, and every command exits 2
+with `REFUSED:` when strict mode stops it.
+
 `pack.sign(secret)` / `pack.verify(signature, secret)` remain for the sandbox. They are HMAC,
 so anyone who can check one can forge one.

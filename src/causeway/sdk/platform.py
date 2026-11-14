@@ -25,6 +25,7 @@ from ..authority.verifier import DelegationVerifier, NonceStore
 from ..contracts.delegation import Constraints
 from ..contracts.identity import Principal, WorkloadIdentity
 from ..contracts.judgment import SystemOne
+from ..errors import ConfigurationError
 from ..evidence.ledger import EvidenceLedger, InMemoryEvidenceLedger
 from ..gateway.credentials import CredentialBroker, LocalCredentialBroker
 from ..gateway.idempotency import IdempotencyStore
@@ -36,6 +37,7 @@ from ..knowledge.memory import MemoryStore
 from ..knowledge.retrieval import RetrievalGateway
 from ..policy.engine import PolicyEngine
 from ..policy.pack import PolicyPack
+from ..policy.trust import LoadedPolicy, PackSource, enforce_policy_trust
 from ..registry.capability import Capability, CapabilityRegistry
 from ..registry.models import ModelCatalog
 from ..runtime.budgets import BudgetLedger, RunBudget
@@ -70,12 +72,16 @@ class Platform:
     models: ModelCatalog = field(default_factory=ModelCatalog)
     audience: str = TOOL_GATEWAY_AUDIENCE
     state: StateDatabase | None = None
+    policy_sources: tuple[PackSource, ...] = ()
+    """Where the running policy came from, and whether each pack was verified."""
     """The durable state file, when the platform was built with one."""
 
     @staticmethod
     def local(
         *,
-        pack: PolicyPack,
+        pack: PolicyPack | None = None,
+        policy: LoadedPolicy | None = None,
+        require_signed_policy: bool = False,
         capabilities: list[Capability] | None = None,
         judge: SystemOne | None = None,
         signer: Signer | None = None,
@@ -96,15 +102,32 @@ class Platform:
         from checking. The delegation verifier then uses ``signer.verifier()``,
         the public half, unless ``signature_verifier`` is given explicitly.
 
+        Pass policy either as ``pack`` (an in-memory pack, no provenance) or as
+        ``policy`` (from ``causeway.policy.load_policy``, which carries each source
+        file's verification status). With ``require_signed_policy=True``, or the
+        ``CAUSEWAY_REQUIRE_SIGNED_POLICY`` environment variable set, the platform
+        refuses to start unless every source pack was verified against a trusted
+        key; an in-memory ``pack`` is always refused in that mode.
+
         Pass ``state_path`` to keep approvals, idempotency keys and delegation
         nonces in a SQLite file instead of memory. A platform rebuilt on the
         same file resumes exactly where the previous one stopped: pending
         approvals are still pending, spent ones stay spent, and a retried
         action returns its original receipt instead of running again.
         """
+        effective_pack: PolicyPack
+        if policy is not None and pack is None:
+            effective_pack, sources = policy.pack, policy.sources
+        elif pack is not None and policy is None:
+            effective_pack, sources = pack, ()
+        else:
+            raise ConfigurationError("pass exactly one of pack= or policy=")
+        # Before anything else is built: a platform that would run unverified
+        # policy in strict mode must not come into existence at all.
+        enforce_policy_trust(sources, require_signed=require_signed_policy)
         active_signer = signer or HmacSigner()
         registry = CapabilityRegistry(capabilities or [])
-        engine = PolicyEngine(pack)
+        engine = PolicyEngine(effective_pack)
         evidence = ledger or InMemoryEvidenceLedger()
         idempotency: IdempotencyStore
         nonces: NonceStore
@@ -146,6 +169,7 @@ class Platform:
             delegation_verifier=verifier,
             models=models or ModelCatalog(),
             state=state,
+            policy_sources=sources,
         )
 
     def close(self) -> None:

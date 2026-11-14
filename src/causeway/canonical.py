@@ -73,9 +73,20 @@ def _normalise(value: Any) -> Any:
     if isinstance(value, Mapping):
         out: dict[str, Any] = {}
         for key, item in value.items():
+            if isinstance(key, Enum) and isinstance(key.value, (str, int)) and not isinstance(
+                key.value, bool
+            ):
+                # An enum key (e.g. a RiskTier in a pack's tier postures) is
+                # encoded as its value, the same way an enum value is.
+                key = str(key.value)
             if not isinstance(key, str):
                 raise CanonicalEncodingError(f"object keys must be strings, got {type(key)!r}")
-            out[unicodedata.normalize("NFC", key)] = _normalise(item)
+            text = unicodedata.normalize("NFC", key)
+            if text in out:
+                # Two distinct keys rendering the same would make two different
+                # objects share an encoding, and so share a signature.
+                raise CanonicalEncodingError(f"object keys collide after encoding: {text!r}")
+            out[text] = _normalise(item)
         return dict(sorted(out.items()))
     if isinstance(value, Set):
         # Sets have no inherent order, so sort their canonical renderings.
